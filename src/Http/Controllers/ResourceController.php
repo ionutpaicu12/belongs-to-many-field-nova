@@ -7,17 +7,28 @@ use Laravel\Nova\Http\Requests\NovaRequest;
 
 class ResourceController
 {
-    public function index(NovaRequest $request, $parent, $relationship, $optionsLabel, $dependsOnValue = null, $dependsOnKey = null)
+    public function index(NovaRequest $request, $parent, $relationship, $name, $optionsLabel, $dependsOnValue = null, $dependsOnKey = null)
     {
         $resourceClass = $request->newResource();
         $field = $resourceClass
             ->availableFields($request)
             ->where('component', 'BelongsToManyField')
             ->where('attribute', $relationship)
+            ->where('name', $name)
             ->first();
+
         $query = $field->resourceClass::newModel();
 
+        if($field->relatableQueryCallback) {
+            $query = $query->tap(function ($query) use ($request, $field) {
+                if (is_callable($field->relatableQueryCallback)) {
+                    call_user_func($field->relatableQueryCallback, $request, $query);
+                }
+            });
+        }
+
         $queryResult = $field->resourceClass::relatableQuery($request, $query);
+
 
         if ($dependsOnValue) {
             $queryResult = $queryResult->where($dependsOnKey, $dependsOnValue);

@@ -3,12 +3,14 @@
 namespace Benjacho\BelongsToManyField;
 
 use Benjacho\BelongsToManyField\Rules\ArrayRules;
+use Laravel\Nova\Fields\AssociatableRelation;
 use Laravel\Nova\Fields\Field;
 use Laravel\Nova\Fields\ResourceRelationshipGuesser;
 use Laravel\Nova\Http\Requests\NovaRequest;
 
 class BelongsToManyField extends Field
 {
+    use AssociatableRelation;
     /**
      * The callback to be used for the field's options.
      *
@@ -59,11 +61,15 @@ class BelongsToManyField extends Field
         $this->resourceName = $resource::uriKey();
         $this->manyToManyRelationship = $this->attribute;
 
-        $this->fillUsing(function ($request, $model, $attribute, $requestAttribute) use ($resource) {
+        $this->fillUsing(function ($request, $model, $attribute, $requestAttribute) use ($resource, $name) {
             if (is_subclass_of($model, 'Illuminate\Database\Eloquent\Model')) {
-                $model::saved(function ($model) use ($attribute, $request) {
-                    $inp = json_decode($request->input($attribute), true);
+                $model::saved(function ($model) use ($attribute, $request, $name) {
+                    $fieldName = $attribute . '-' . $name;
+                    $fieldName = strtolower($fieldName);
+                    $fieldName = preg_replace('/\s+/', '-', $fieldName);
+                    $fieldName = preg_replace('/[^\w-]+/', '', $fieldName);
 
+                    $inp = json_decode($request->input($fieldName), true);
                     if ($inp !== null) {
                         $values = array_column($inp, 'id');
                     } else {
@@ -74,7 +80,19 @@ class BelongsToManyField extends Field
                         $values = array_fill_keys($values, $this->pivot());
                     }
 
-                    $model->$attribute()->sync(
+                    $query = $model->$attribute();
+
+                    $query = $query->tap(function ($query) use ($request, $model) {
+                        if (is_callable($this->relatableQueryCallback)) {
+                            call_user_func($this->relatableQueryCallback, $request, $query);
+                        }
+                    });
+
+                    $toRemove = $query->get()->pluck('id')->toArray();
+
+                    $model->$attribute()->detach($toRemove);
+
+                    $query->attach(
                         $values
                     );
                 });
@@ -88,7 +106,7 @@ class BelongsToManyField extends Field
     {
         $this->label = $optionsLabel;
 
-        return $this->withMeta(['optionsLabel' => $this->label]);
+        return $this->withMeta(['withLabel' => $this->label]);
     }
 
     public function trackBy(string $trackBy)
@@ -171,8 +189,16 @@ class BelongsToManyField extends Field
         if ($this->isAction) {
             parent::resolve($resource, $attribute);
         } else {
+
             parent::resolve($resource, $attribute);
-            $value = json_decode($resource->{$this->attribute});
+
+            if ($this->relatableQueryCallback) {
+                $relationshipQuery = $resource->{$this->attribute}();
+                $relationshipQuery = call_user_func($this->relatableQueryCallback, request(), $relationshipQuery);
+                $value = $relationshipQuery->get();
+            } else {
+                $value = json_decode($resource->{$this->attribute});
+            }
 
             if ($value) {
                 $this->value = $value;
@@ -251,10 +277,18 @@ class BelongsToManyField extends Field
     {
         if (isset($this->optionsCallback)) {
             if (is_callable($this->optionsCallback)) {
-                $this->withMeta(['options' => call_user_func($this->optionsCallback)]);
+                $options = call_user_func($this->optionsCallback);
             } else {
-                $this->withMeta(['options' => collect($this->optionsCallback)]);
+                $options = collect($this->optionsCallback);
             }
+
+            if ($this->relatableQueryCallback) {
+                $query = $this->relationModel::query();
+                $query = call_user_func($this->relatableQueryCallback, request(), $query);
+                $options = $query->get();
+            }
+
+            $this->withMeta(['options' => $options]);
         }
     }
 }

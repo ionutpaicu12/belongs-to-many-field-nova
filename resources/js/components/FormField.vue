@@ -197,6 +197,8 @@ export default {
               "options/" +
               this.field.attribute +
               "/" +
+              this.field.name +
+              "/" +
               this.optionsLabel +
               "/" +
               this.dependsOnValue +
@@ -218,6 +220,8 @@ export default {
             "options/" +
             this.field.attribute +
             "/" +
+            this.field.name +
+            "/" +
             this.optionsLabel
         ).then((data) => {
           this.options = data.data;
@@ -230,7 +234,11 @@ export default {
      * Fill the given FormData object with the field's internal value.
      */
     fill(formData) {
-      formData.append(this.field.attribute, JSON.stringify(this.value) || "");
+        let formFieldName = (this.field.attribute + '-' + this.field.name)
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^\w-]+/g, '');
+      formData.append(formFieldName, JSON.stringify(this.value) || "");
     },
 
     /**
